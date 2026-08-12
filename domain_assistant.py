@@ -13,6 +13,8 @@ import math
 import os
 import re
 import time
+import urllib.error
+import urllib.request
 from collections import Counter
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, replace
@@ -244,27 +246,91 @@ class TextGenerator(Protocol):
 
 class OpenAIGenerator:
     def __init__(self, max_output_tokens: int = 300) -> None:
-        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        api_key = (
+            os.getenv("OPENROUTER_API_KEY", "").strip()
+            or os.getenv("OPENAI_API_KEY", "").strip()
+        )
         self.model = os.getenv("OPENAI_MODEL", "").strip()
+        base_url = os.getenv("OPENAI_BASE_URL", "").strip() or None
+        self.api_key = api_key
+        self.base_url = base_url
         if not api_key:
-            raise RuntimeError("OPENAI_API_KEY is missing from .env")
+            raise RuntimeError("OPENROUTER_API_KEY or OPENAI_API_KEY is missing from .env")
         if not self.model:
             raise RuntimeError("OPENAI_MODEL is missing from .env")
-        self.client = OpenAI(api_key=api_key)
+        default_headers = None
+        if base_url and "openrouter.ai" in base_url:
+            default_headers = {
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "http://localhost",
+                "X-Title": "Northstar Student Services Lab",
+            }
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            default_headers=default_headers,
+        )
+        self.uses_openrouter = bool(base_url and "openrouter.ai" in base_url)
         self.max_output_tokens = max_output_tokens
 
     def generate(self, prompt: str) -> str:
-        response = self.client.responses.create(
-            model=self.model,
-            input=prompt,
-            temperature=0,
-            max_output_tokens=self.max_output_tokens,
-        )
-        answer = response.output_text.strip()
-        if not answer:
-            raise RuntimeError("OpenAI returned an empty answer")
-        return answer
+        max_retries = 4
+        for attempt in range(max_retries + 1):
+            try:
+                return self._do_generate(prompt)
+            except RuntimeError as exc:
+                if "429" in str(exc) or "empty answer" in str(exc).lower():
+                    if attempt < max_retries:
+                        wait = [15, 30, 60, 120][min(attempt, 3)]
+                        import sys
+                        print(f"\n  ⏳ Rate limited, waiting {wait}s (attempt {attempt+1}/{max_retries})...", file=sys.stderr, flush=True)
+                        time.sleep(wait)
+                        continue
+                raise
+        return self._do_generate(prompt)
 
+    def _do_generate(self, prompt: str) -> str:
+        if self.uses_openrouter:
+            time.sleep(5)  # throttle for free tier
+            payload = json.dumps(
+                {
+                    "model": self.model,
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0,
+                    "max_tokens": self.max_output_tokens,
+                }
+            ).encode("utf-8")
+            request = urllib.request.Request(
+                f"{self.base_url.rstrip('/')}/chat/completions",
+                data=payload,
+                method="POST",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "http://localhost",
+                    "X-Title": "Northstar Student Services Lab",
+                },
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    data = json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                raise RuntimeError(f"OpenRouter request failed: HTTP {exc.code} {detail}") from exc
+            choices = data.get("choices") or []
+            message = choices[0].get("message", {}) if choices else {}
+            answer = str(message.get("content") or "").strip()
+        else:
+            response = self.client.responses.create(
+                model=self.model,
+                input=prompt,
+                temperature=0,
+                max_output_tokens=self.max_output_tokens,
+            )
+            answer = response.output_text.strip()
+        if not answer:
+            raise RuntimeError("Model returned an empty answer")
+        return answer
 
 @dataclass(frozen=True)
 class DomainResponse:
