@@ -30,11 +30,11 @@ critical.
 
 | Metric | Acceptable Low Score Scenario | Critical Low Score Scenario | Action Required |
 |---|---|---|---|
-| Faithfulness | | | |
-| Answer Relevance | | | |
-| Context Recall | | | |
-| Context Precision | | | |
-| Completeness | | | |
+| Faithfulness | Có thể chấp nhận thấp khi câu hỏi nằm ngoài scope và assistant từ chối thay vì dùng context. | Critical khi answer đưa ra chính sách, ngày, khoản phí hoặc điều kiện không có trong corpus. | Kiểm tra retrieved context, thêm grounding instruction, và block deploy nếu nhiều claim unsupported. |
+| Answer Relevance | Có thể thấp khi câu hỏi mơ hồ hoặc adversarial và response cần hỏi lại/giới hạn phạm vi. | Critical khi answer không giải quyết intent chính của câu hỏi student services. | Sửa prompt intent handling, thêm examples cho câu hỏi phổ biến và case mơ hồ. |
+| Context Recall | Có thể thấp với câu hỏi out-of-scope vì không cần retrieve evidence domain cụ thể. | Critical khi expected answer cần evidence rõ ràng nhưng retriever không lấy được policy liên quan. | Sửa query/chunking/top-k, thêm reranking hoặc cải thiện metadata/source coverage. |
+| Context Precision | Có thể thấp nếu retriever lấy đủ evidence nhưng nhiều chunk phụ để hỗ trợ câu hỏi phức tạp. | Critical khi evidence đúng bị chôn sau nhiều chunk noise làm generation dễ sai hoặc thiếu. | Rerank chunks, giảm noise, cải thiện scoring và kiểm tra Precision@K. |
+| Completeness | Có thể thấp khi answer cố ý ngắn cho câu hỏi đơn giản hoặc từ chối đúng scope. | Critical khi answer bỏ sót deadline, exception, eligibility condition, escalation step hoặc privacy warning quan trọng. | Thêm checklist trong prompt, cải thiện retrieval coverage, và đánh giá lại cases thiếu thông tin. |
 
 ### Exercise 1.2 — Bias trong LLM-as-a-Judge
 
@@ -46,15 +46,15 @@ Ba bias thường gặp:
 
 **Câu 1: Thiết kế experiment phát hiện position bias với ít nhất hai conditions.**
 
-> *Câu trả lời:*
+> *Câu trả lời:* Tạo một tập câu hỏi có hai response A và B đã được human label trước, trong đó A tốt hơn B hoặc B tốt hơn A. Condition 1 đặt thứ tự A trước B, condition 2 đảo thứ tự B trước A nhưng giữ nguyên nội dung và rubric. Nếu judge thường xuyên chấm response đứng trước cao hơn dù nội dung không đổi, đó là dấu hiệu position bias.
 
 **Câu 2: Làm thế nào giảm verbosity bias bằng rubric design?**
 
-> *Câu trả lời:*
+> *Câu trả lời:* Rubric cần tách "đầy đủ" khỏi "dài", yêu cầu mỗi claim phải đúng và có evidence, đồng thời phạt thông tin thừa, lan man hoặc không giúp hành động. Tiêu chí score cao nên nhấn mạnh correctness, completeness vừa đủ, evidence, actionability và clarity, không thưởng response chỉ vì nhiều chữ.
 
 **Câu 3: Tại sao cần calibrate LLM judge với human labels?**
 
-> *Câu trả lời:*
+> *Câu trả lời:* Human labels là mốc chuẩn để kiểm tra judge có chấm giống kỳ vọng domain hay không. Calibration giúp phát hiện judge quá dễ, quá nghiêm, thiên vị format/model, hoặc bỏ qua lỗi quan trọng như privacy, policy exception và missing evidence.
 
 ### Exercise 1.3 — Evaluation trong CI/CD
 
@@ -62,13 +62,13 @@ Ba bias thường gặp:
 
 | Metric | Threshold | Lý do |
 |---|---:|---|
-| Faithfulness | | |
-| Answer Relevance | | |
-| Completeness | | |
+| Faithfulness | 0.75 | Student Services có nhiều chính sách, deadline và điều kiện; answer không grounded có thể gây hướng dẫn sai cho sinh viên. |
+| Answer Relevance | 0.70 | Response phải trả lời đúng intent trước khi deploy; thấp hơn mức này cho thấy prompt/routing chưa ổn. |
+| Completeness | 0.70 | Nếu thiếu điều kiện, exception hoặc next step, sinh viên có thể hành động sai dù answer có vẻ đúng. |
 
 **Câu 2: Khi nào dùng offline evaluation, online evaluation và human review?**
 
-> *Câu trả lời:*
+> *Câu trả lời:* Offline evaluation dùng trước mỗi code/prompt/retrieval change để kiểm tra regression trên golden dataset. Online evaluation dùng sau deploy để theo dõi traffic thật, drift, latency, cost và user feedback. Human review dùng cho case high-stakes, câu hỏi mơ hồ, privacy/security, appeal/complaint, hoặc khi cần calibrate LLM-as-a-Judge.
 
 ---
 
